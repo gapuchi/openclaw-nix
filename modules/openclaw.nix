@@ -9,23 +9,91 @@ let
   cfg = config.services.openclaw;
   settingsFormat = pkgs.formats.json { };
 
-  # Generate gateway config
-  gatewayConfig = {
-    host = "127.0.0.1";
+  gatewayBase = {
+    mode = "local";
     port = cfg.gatewayPort;
+    bind = "loopback";
     auth = {
-      enabled = true;
-      tokenFile = cfg.authTokenFile;
+      mode = "token";
+      token = {
+        source = "file";
+        provider = "gatewayToken";
+        id = "value";
+      };
     };
-    tools = {
-      security = cfg.toolSecurity;
-      allowlist = cfg.toolAllowlist;
+  };
+
+  toolsFromModule =
+    lib.optionalAttrs (cfg.toolSecurity == "allowlist") { allow = cfg.toolAllowlist; }
+    // lib.optionalAttrs (cfg.toolSecurity == "deny") { deny = [ "*" ]; };
+
+  secretProviders = {
+    gatewayToken = {
+      source = "file";
+      path = toString cfg.authTokenFile;
+      mode = "singleValue";
     };
   }
-  // cfg.extraGatewayConfig;
+  // lib.optionalAttrs (cfg.modelApiKeyFile != null) {
+    modelApiKey = {
+      source = "file";
+      path = toString cfg.modelApiKeyFile;
+      mode = "singleValue";
+    };
+  }
+  // lib.optionalAttrs (cfg.discord.enable && cfg.discord.tokenFile != null) {
+    discordToken = {
+      source = "file";
+      path = toString cfg.discord.tokenFile;
+      mode = "singleValue";
+    };
+  };
+
+  modelsBlock = lib.optionalAttrs (cfg.modelApiKeyFile != null) {
+    models = {
+      mode = "merge";
+      providers = {
+        "${cfg.modelProvider}" = {
+          apiKey = {
+            source = "file";
+            provider = "modelApiKey";
+            id = "value";
+          };
+        };
+      };
+    };
+  };
+
+  channelsInner =
+    lib.optionalAttrs (cfg.telegram.enable && cfg.telegram.tokenFile != null) {
+      telegram = {
+        enabled = true;
+        tokenFile = toString cfg.telegram.tokenFile;
+      };
+    }
+    // lib.optionalAttrs (cfg.discord.enable && cfg.discord.tokenFile != null) {
+      discord = {
+        enabled = true;
+        token = {
+          source = "file";
+          provider = "discordToken";
+          id = "value";
+        };
+      };
+    };
+
+  channelsBlock = lib.optionalAttrs (channelsInner != { }) { channels = channelsInner; };
+
+  openclawConfig = lib.foldl' lib.recursiveUpdate { } [
+    { secrets.providers = secretProviders; }
+    { gateway = lib.recursiveUpdate gatewayBase cfg.extraGatewayConfig; }
+    (lib.optionalAttrs (toolsFromModule != { }) { tools = toolsFromModule; })
+    modelsBlock
+    channelsBlock
+  ];
 
   # Store path; copied into ~/.openclaw/openclaw.json for the service (see preStart).
-  openclawConfigFile = settingsFormat.generate "openclaw.json" gatewayConfig;
+  openclawConfigFile = settingsFormat.generate "openclaw.json" openclawConfig;
 in
 {
   options.services.openclaw = {
@@ -78,7 +146,7 @@ in
     gatewayPort = lib.mkOption {
       type = lib.types.port;
       default = 3000;
-      description = "Local port for the OpenClaw gateway (bound to localhost only).";
+      description = "Gateway listen port (`gateway.port` in openclaw.json). Binds via `gateway.bind` (loopback).";
     };
 
     authTokenFile = lib.mkOption {
@@ -130,20 +198,20 @@ in
 
     # --- Plugins ---
     telegram = {
-      enable = lib.mkEnableOption "Telegram plugin";
+      enable = lib.mkEnableOption "Telegram channel";
       tokenFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
-        description = "Path to file containing Telegram bot token.";
+        description = "Bot token file (`channels.telegram.tokenFile` in openclaw.json).";
       };
     };
 
     discord = {
-      enable = lib.mkEnableOption "Discord plugin";
+      enable = lib.mkEnableOption "Discord channel";
       tokenFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
-        description = "Path to file containing Discord bot token.";
+        description = "Bot token file (`channels.discord.token` via SecretRef in openclaw.json).";
       };
     };
 
@@ -151,13 +219,19 @@ in
     modelProvider = lib.mkOption {
       type = lib.types.str;
       default = "anthropic";
-      description = "Default model provider (anthropic, openai, ollama, etc).";
+      description = ''
+        Provider id for `models.providers.<id>.apiKey` when `modelApiKeyFile` is set
+        (must match OpenClaw catalog ids, e.g. `anthropic`, `openai`).
+      '';
     };
 
     modelApiKeyFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = "Path to file containing model API key.";
+      description = ''
+        If set, registers a SecretRef-backed API key at
+        `models.providers.<modelProvider>.apiKey` in openclaw.json.
+      '';
     };
 
     # --- Updates ---
@@ -174,7 +248,27 @@ in
     extraGatewayConfig = lib.mkOption {
       type = lib.types.attrs;
       default = { };
-      description = "Extra attributes merged into gateway config.";
+      description = ''
+        Extra attributes deep-merged into the `gateway` object in openclaw.json.
+        See OpenClaw gateway configuration reference for valid keys.
+      '';
+    };
+
+    logLevel = lib.mkOption {
+      type = lib.types.nullOr (
+        lib.types.enum [
+          "debug"
+          "info"
+          "warn"
+          "error"
+          "trace"
+        ]
+      );
+      default = null;
+      description = ''
+        If set, sets `OPENCLAW_LOG_LEVEL` for the service (overrides `logging.*` in config).
+        Prefer this for temporary debug without editing generated JSON.
+      '';
     };
 
     openFirewall = lib.mkOption {
@@ -210,7 +304,7 @@ in
           echo "Generated new gateway auth token at ${cfg.authTokenFile}"
         fi
         # Default config path: ~/.openclaw/openclaw.json (HOME = dataDir for this user)
-        install -m640 -o openclaw -g openclaw ${openclawConfigFile} ${cfg.dataDir}/.openclaw/openclaw.json
+        install -m640 ${openclawConfigFile} ${cfg.dataDir}/.openclaw/openclaw.json
       '';
 
       serviceConfig = {
@@ -262,18 +356,11 @@ in
       environment = lib.mkMerge [
         {
           HOME = toString cfg.dataDir;
-          OPENCLAW_HOST = "127.0.0.1";
-          OPENCLAW_PORT = toString cfg.gatewayPort;
+          OPENCLAW_HOME = toString cfg.dataDir;
           NODE_ENV = "production";
         }
-        (lib.mkIf (cfg.modelApiKeyFile != null) {
-          OPENCLAW_MODEL_PROVIDER = cfg.modelProvider;
-        })
-        (lib.mkIf (cfg.telegram.enable && cfg.telegram.tokenFile != null) {
-          OPENCLAW_TELEGRAM_ENABLED = "true";
-        })
-        (lib.mkIf (cfg.discord.enable && cfg.discord.tokenFile != null) {
-          OPENCLAW_DISCORD_ENABLED = "true";
+        (lib.mkIf (cfg.logLevel != null) {
+          OPENCLAW_LOG_LEVEL = cfg.logLevel;
         })
       ];
     };

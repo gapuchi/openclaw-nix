@@ -5,9 +5,13 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      supportedSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
@@ -21,7 +25,8 @@
       };
 
       # Standalone packages
-      packages = forAllSystems (system:
+      packages = forAllSystems (
+        system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
           nodejs = pkgs.nodejs_22;
@@ -35,7 +40,10 @@
               url = "https://registry.npmjs.org/openclaw/-/openclaw-${version}.tgz";
               hash = "sha256-zDMRFzjdetdw0Q47uqCIKHoqV7UwjxKnS6L9u2VoTJM=";
             };
-            phases = [ "unpackPhase" "installPhase" ];
+            phases = [
+              "unpackPhase"
+              "installPhase"
+            ];
             installPhase = ''
               cp -r . $out
               cp ${./package-lock.json} $out/package-lock.json
@@ -56,7 +64,10 @@
 
             # Skip native compilation of optional deps (node-llama-cpp, etc)
             # Sharp will use prebuilt binaries
-            npmFlags = [ "--ignore-scripts" "--legacy-peer-deps" ];
+            npmFlags = [
+              "--ignore-scripts"
+              "--legacy-peer-deps"
+            ];
             makeCacheWritable = true;
 
             nativeBuildInputs = with pkgs; [
@@ -66,7 +77,7 @@
             ];
 
             buildInputs = with pkgs; [
-              vips  # for sharp prebuilt binaries
+              vips # for sharp prebuilt binaries
             ];
 
             # The package is pre-built (dist/ included in npm tarball)
@@ -100,7 +111,9 @@
         {
           openclaw = openclawPkg;
 
-          quick-setup = pkgs.writeShellScriptBin "openclaw-setup" (builtins.readFile ./scripts/quick-setup.sh);
+          quick-setup = pkgs.writeShellScriptBin "openclaw-setup" (
+            builtins.readFile ./scripts/quick-setup.sh
+          );
 
           default = pkgs.writeShellScriptBin "openclaw-nix" ''
             echo ""
@@ -137,7 +150,8 @@
             echo "  Docs: https://github.com/Scout-DJ/openclaw-nix"
             echo ""
           '';
-        });
+        }
+      );
 
       apps = forAllSystems (system: {
         default = {
