@@ -24,7 +24,8 @@ let
   }
   // cfg.extraGatewayConfig;
 
-  gatewayConfigFile = settingsFormat.generate "openclaw-gateway.json" gatewayConfig;
+  # Store path; copied into ~/.openclaw/openclaw.json for the service (see preStart).
+  openclawConfigFile = settingsFormat.generate "openclaw.json" gatewayConfig;
 in
 {
   options.services.openclaw = {
@@ -89,7 +90,10 @@ in
     dataDir = lib.mkOption {
       type = lib.types.path;
       default = "/var/lib/openclaw";
-      description = "State directory for OpenClaw data.";
+      description = ''
+        Home directory for the `openclaw` user. OpenClaw loads config from
+        `''${dataDir}/.openclaw/openclaw.json` (installed from the Nix-generated file on each start).
+      '';
     };
 
     # --- Tool Security ---
@@ -188,6 +192,7 @@ in
     # ── Auth token generation ──
     systemd.tmpfiles.rules = [
       "d ${cfg.dataDir} 0750 openclaw openclaw -"
+      "d ${cfg.dataDir}/.openclaw 0750 openclaw openclaw -"
     ];
 
     # ── Main gateway service ──
@@ -204,11 +209,13 @@ in
           chmod 600 "${cfg.authTokenFile}"
           echo "Generated new gateway auth token at ${cfg.authTokenFile}"
         fi
+        # Default config path: ~/.openclaw/openclaw.json (HOME = dataDir for this user)
+        install -m640 -o openclaw -g openclaw ${openclawConfigFile} ${cfg.dataDir}/.openclaw/openclaw.json
       '';
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${cfg.package}/bin/openclaw gateway start --config ${gatewayConfigFile}";
+        ExecStart = "${cfg.package}/bin/openclaw gateway start";
         Restart = "on-failure";
         RestartSec = 5;
         WorkingDirectory = cfg.dataDir;
@@ -254,6 +261,7 @@ in
 
       environment = lib.mkMerge [
         {
+          HOME = toString cfg.dataDir;
           OPENCLAW_HOST = "127.0.0.1";
           OPENCLAW_PORT = toString cfg.gatewayPort;
           NODE_ENV = "production";
