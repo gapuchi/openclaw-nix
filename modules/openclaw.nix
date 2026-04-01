@@ -97,48 +97,55 @@ in
       #
       # When `controlUiAllowedOrigins` is non-empty, sets `gateway.controlUi` for HTTPS / hostname UI.
       openclawConfigFile = settingsFormat.generate "openclaw.json" {
-        gateway =
-          {
-            mode = "local";
-            port = cfg.gatewayPort;
-            bind = "loopback";
-            auth = {
-              mode = "token";
-              token = "";
-            };
-          }
-          // lib.optionalAttrs (cfg.controlUiAllowedOrigins != [ ]) {
-            controlUi = {
-              enabled = true;
-              allowedOrigins = cfg.controlUiAllowedOrigins;
-            };
+        gateway = {
+          mode = "local";
+          port = cfg.gatewayPort;
+          bind = "loopback";
+          auth = {
+            mode = "token";
+            token = "";
           };
-        models = {
-          providers = {
-            anthropic = {
-              apiKey = {
-                source = "file";
-                provider = "anthropicApiKey";
-                id = "value";
-              };
-            };
+        }
+        // lib.optionalAttrs (cfg.controlUiAllowedOrigins != [ ]) {
+          controlUi = {
+            enabled = true;
+            allowedOrigins = cfg.controlUiAllowedOrigins;
           };
         };
+        # models = {
+        #   providers = {
+        #     anthropic = {
+        #       apiKey = {
+        #         source = "file";
+        #         provider = "anthropicApiKey";
+        #         id = "value";
+        #       };
+        #     };
+        #   };
+        # };
         agents = {
           defaults = {
             model = "anthropic/claude-sonnet-4-6";
             workspace = "${openclawHome}/workspace";
           };
         };
-        secrets = {
-          providers = {
-            anthropicApiKey = {
-              source = "file";
-              path = toString cfg.anthropicApiKeyFile;
-              mode = "singleValue";
-            };
-          };
-        };
+        # secrets = {
+        #   providers = {
+        #     anthropic = {
+        #       source = "file";
+        #       path = toString cfg.anthropicApiKeyFile;
+        #       mode = "singleValue";
+        #     };
+        #   };
+        # };
+        # auth = {
+        #   profiles = {
+        #     "anthropic:default" = {
+        #       provider = "anthropic";
+        #       mode = "api_key";
+        #     };
+        #   };
+        # };
       };
     in
     {
@@ -175,6 +182,7 @@ in
           # `gateway start` here — that subcommand only talks to the *user* systemd
           # unit (systemctl --user) and fails without a session bus (e.g. system services).
           ExecStart = "${cfg.package}/bin/openclaw gateway run";
+          EnvironmentFile = cfg.anthropicApiKeyFile;
           Restart = "on-failure";
           RestartSec = 5;
           WorkingDirectory = cfg.dataDir;

@@ -2,10 +2,10 @@
 
 let
   pin = {
-    version = "2026.3.28";
-    npmTarballHash = "sha256-/XCaOfXRTAL3c/N+GKq8D1GAw3N7Jvce+pCwba/D7cI=";
+    version = "2026.4.2";
+    npmTarballHash = "sha256-tbXIalz/wOlNcM/3dceVENkF/vDMqrJk/Cse2+1en3A=";
     # Generated with: prefetch-npm-deps package-lock.json
-    npmDepsHash = "sha256-v2UB5lpEJDHneLn7Uz5utsbn85CxJOTdwJkphXjJbBY=";
+    npmDepsHash = "sha256-++vuo6IQM7Ec2Bv3Ft68hysHM914VZmBzOr2TnOHzgk=";
   };
 
   nodejs = pkgs.nodejs_24;
