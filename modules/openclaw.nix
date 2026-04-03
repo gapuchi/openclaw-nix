@@ -129,6 +129,16 @@ in
             workspace = "${openclawHome}/workspace";
           };
         };
+        channels = {
+          discord = {
+            enabled = true;
+            token = {
+              source = "env";
+              provider = "default";
+              id = "DISCORD_BOT_TOKEN";
+            };
+          };
+        };
         # secrets = {
         #   providers = {
         #     anthropic = {
