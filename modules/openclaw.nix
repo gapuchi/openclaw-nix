@@ -132,10 +132,16 @@ in
         channels = {
           discord = {
             enabled = true;
+            groupPolicy = "allowlist";
             token = {
               source = "env";
               provider = "default";
               id = "DISCORD_BOT_TOKEN";
+            };
+            guilds = {
+              "1489515613893431316" = {
+                requireMention = true;
+              };
             };
           };
         };

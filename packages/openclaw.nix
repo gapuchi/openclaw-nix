@@ -4,14 +4,18 @@ let
   pin = {
     version = "2026.4.2";
     npmTarballHash = "sha256-tbXIalz/wOlNcM/3dceVENkF/vDMqrJk/Cse2+1en3A=";
-    # Generated with: prefetch-npm-deps package-lock.json
-    npmDepsHash = "sha256-++vuo6IQM7Ec2Bv3Ft68hysHM914VZmBzOr2TnOHzgk=";
+    # Generated with: nix build .#openclaw (set to fakeHash first, then use the correct hash from the error)
+    pnpmDepsHash = "sha256-aHepSWiQ4+UyjPHBF+4+M9/nFrgfCw422q671saJM+U=";
   };
 
   nodejs = pkgs.nodejs_24;
-  lockfile = ../package-lock.json;
+  lockfile = ../pnpm-lock.yaml;
 
-  # Combine tarball + lockfile into a proper source
+  # Combine tarball + lockfile + .npmrc into a proper source.
+  # The published npm tarball excludes pnpm-lock.yaml and .npmrc, so we inject
+  # them here. node-linker=hoisted is required so workspace sub-package deps
+  # (e.g. @buape/carbon from extensions/discord) are hoisted to the top-level
+  # node_modules, matching the upstream repo's configuration.
   src = pkgs.stdenv.mkDerivation {
     name = "openclaw-src-${pin.version}";
     src = pkgs.fetchurl {
@@ -24,27 +28,27 @@ let
     ];
     installPhase = ''
       cp -r . $out
-      cp ${lockfile} $out/package-lock.json
+      cp ${lockfile} $out/pnpm-lock.yaml
+      echo 'node-linker=hoisted' > $out/.npmrc
     '';
     sourceRoot = "package";
   };
 in
-pkgs.buildNpmPackage {
+pkgs.stdenv.mkDerivation (finalAttrs: {
   pname = "openclaw";
   inherit src;
-  inherit nodejs;
   version = pin.version;
-  npmDepsHash = pin.npmDepsHash;
 
-  # Skip native compilation of optional deps (node-llama-cpp, etc)
-  # Sharp will use prebuilt binaries
-  npmFlags = [
-    "--ignore-scripts"
-    "--legacy-peer-deps"
-  ];
-  makeCacheWritable = true;
+  pnpmDeps = pkgs.fetchPnpmDeps {
+    inherit (finalAttrs) pname version src;
+    hash = pin.pnpmDepsHash;
+    fetcherVersion = 3;
+  };
 
   nativeBuildInputs = with pkgs; [
+    nodejs
+    pnpm
+    pnpmConfigHook
     python3
     pkg-config
     makeWrapper
@@ -56,21 +60,25 @@ pkgs.buildNpmPackage {
 
   # The package is pre-built (dist/ included in npm tarball)
   # so we just need to install deps and create wrappers
-  dontNpmBuild = true;
+  dontBuild = true;
 
-  postInstall = ''
+  installPhase = ''
+    runHook preInstall
+
+    mkdir -p $out/lib/node_modules/openclaw
+    cp -r . $out/lib/node_modules/openclaw
+
     # sharp needs its platform-specific prebuilt binary
-    # Run install/check to download it (network allowed in this phase
-    # only if using --impure; otherwise sharp falls back gracefully)
     cd $out/lib/node_modules/openclaw
     ${nodejs}/bin/node node_modules/sharp/install/check.js 2>/dev/null || true
 
     # Ensure the openclaw binary wrapper exists
     mkdir -p $out/bin
-    rm -f $out/bin/openclaw 2>/dev/null || true
     makeWrapper "${nodejs}/bin/node" "$out/bin/openclaw" \
       --add-flags "$out/lib/node_modules/openclaw/openclaw.mjs" \
       --set NODE_PATH "$out/lib/node_modules"
+
+    runHook postInstall
   '';
 
   meta = with pkgs.lib; {
@@ -80,4 +88,4 @@ pkgs.buildNpmPackage {
     platforms = platforms.linux;
     mainProgram = "openclaw";
   };
-}
+})
